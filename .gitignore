@@ -1,5 +1,8 @@
 # Exclude compiled files
 __pycache__
 
-#Exclude IDE files
+# Exclude IDE files
 .vscode
+
+# Exclude generated graphics
+*.png
