@@ -1,0 +1,5 @@
+# Exclude compiled files
+__pycache__
+
+#Exclude IDE files
+.vscode
