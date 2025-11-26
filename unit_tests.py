@@ -12,24 +12,6 @@ from scipy.stats import unitary_group
 from number_entanglement import *
 
 
-def is_degenerate(matrix):
-    """
-    Tests if any two eigenvalues of a given `matrix` are equal.
-
-    @param matrix: 2D numpy array representing the matrix we want to check the
-        degeneracy of.
-
-    @return: `True` if the matrix is degenerate, `False` otherwise.
-    """
-    eigenvalues, _ = np.linalg.eigh(matrix)
-
-    for i in range(len(eigenvalues) - 1):
-        if np.isclose(eigenvalues[i], eigenvalues[i + 1]):
-            return True
-
-    return False
-
-
 def is_hermitian(matrix, dim):
     """
     Tests if the given matrix describes a Hermitian matrix of the right dimension.
@@ -45,21 +27,6 @@ def is_hermitian(matrix, dim):
     hermitian = np.allclose(matrix.conj().T, matrix)
 
     return right_dims and hermitian
-
-
-def is_good_operator(operator, dim):
-    """
-    Tests if the given matrix describes a non-degenerate Hermitian matrix of the right
-    dimensions.
-
-    @param operator: 2D numpy array that should represent the matrix form of a
-        non-degenerate Hermitian operator of dimensions `dim` x `dim`.
-    @param dim: Supposed dimension of the matrix.
-
-    @return: True if `matrix` describes a non-degenerate Hermitian matrix of dimensions
-        `dim` x `dim`, false otherwise.
-    """
-    return is_hermitian(operator, dim) and not is_degenerate(operator)
 
 
 def is_density_matrix(matrix, dim):
@@ -196,36 +163,44 @@ class TestNumberEntanglement(unittest.TestCase):
         dim_b = 4
         dim_total = dim_a * dim_b
 
-        basis = separable_state_basis(dim_a, dim_b)
-
-        state = random_separable_state(basis)
+        state = random_separable_state(dim_a, dim_b)
 
         # We should also check that the state is separable, but it is NP-hard to do so.
         self.assertTrue(is_density_matrix(state, dim_total))
 
     def test_number_operator(self):
         dim = 3
-
         operator = number_operator(dim)
 
-        zero_elements = np.count_nonzero(operator - np.diag(np.diagonal(operator)))
+        non_zero_elements = np.count_nonzero(operator - np.diag(np.diagonal(operator)))
+        self.assertEqual(non_zero_elements, 0)
 
-        self.assertEqual(zero_elements, 0)
-        # Remove this test if the code allows the number operators of each subsystems
-        # to be degenerate.
-        self.assertTrue(is_good_operator(operator, dim))
+        self.assertTrue(is_hermitian(operator, dim))
 
     def test_separable_operator(self):
-        # TODO
-        self.assertTrue(True)
+        dim_a = 2
+        dim_b = 4
+        dim_total = dim_a * dim_b
+
+        operator, operator_a, operator_b = separable_operator(
+            number_operator, dim_a, dim_b
+        )
+
+        self.assertTrue(is_hermitian(operator_a, dim_total))
+        self.assertTrue(is_hermitian(operator_b, dim_total))
+
+        # We should also check that the operator is separable, but it is NP-hard to do so.
+        self.assertTrue(is_hermitian(operator, dim_total))
 
     def test_find_charge_sectors(self):
-        # TODO
-        self.assertTrue(True)
+        mat = np.array([[0, 0], [0, 0]])
+        charge_sectors = find_charge_sectors(mat)
+        self.assertTrue(np.allclose(charge_sectors[0], [0, 1]))
 
-    def test_scramble_basis(self):
-        # TODO
-        self.assertTrue(True)
+        mat = np.array([[0, 0], [0, 1]])
+        charge_sectors = find_charge_sectors(mat)
+        self.assertTrue(np.allclose(charge_sectors[0], [0]))
+        self.assertTrue(np.allclose(charge_sectors[1], [1]))
 
     def test_project_states(self):
         n_states = 5
@@ -233,14 +208,13 @@ class TestNumberEntanglement(unittest.TestCase):
         dim_b = 4
         dim_total = dim_a * dim_b
 
-        basis = separable_state_basis(dim_a, dim_b)
-        states = [random_separable_state(basis) for _ in range(n_states)]
+        states = [random_separable_state(dim_a, dim_b) for _ in range(n_states)]
 
         operator = number_operator(dim_total)
 
         self.assertTrue(is_valid_projection(states, operator, dim_total))
 
-        operator = separable_operator(number_operator, dim_a, dim_b)
+        operator, _, _ = separable_operator(number_operator, dim_a, dim_b)
 
         self.assertTrue(is_valid_projection(states, operator, dim_total))
 
@@ -257,8 +231,7 @@ class TestNumberEntanglement(unittest.TestCase):
         entropy = von_neumann_entropy(max_mixed_state)
         self.assertTrue(np.isclose(entropy, np.log(dim_total)))
 
-        basis = separable_state_basis(dim_a, dim_b)
-        state = random_separable_state(basis)
+        state = random_separable_state(dim_a, dim_b)
         entropy = von_neumann_entropy(state)
         self.assertGreaterEqual(entropy, 0.0)
         self.assertLessEqual(entropy, np.log(dim_total))
@@ -272,21 +245,25 @@ class TestNumberEntanglement(unittest.TestCase):
         dim_a = 2
         dim_b = 4
 
-        basis = separable_state_basis(dim_a, dim_b)
-        states = [random_separable_state(basis) for _ in range(n_states)]
+        states = [random_separable_state(dim_a, dim_b) for _ in range(n_states)]
 
-        operator = separable_operator(number_operator, dim_a, dim_b)
+        operator, operator_a, operator_b = separable_operator(
+            number_operator, dim_a, dim_b
+        )
 
         projected_states = project_states(states, operator)
 
-        number_entanglement_list = numbers_entanglement(projected_states)
+        number_entanglement_list_a = numbers_entanglement(projected_states, operator_a)
+        number_entanglement_list_b = numbers_entanglement(projected_states, operator_b)
 
-        for number_entanglement in number_entanglement_list:
+        for number_entanglement_a, number_entanglement_b in zip(
+            number_entanglement_list_a, number_entanglement_list_b
+        ):
             self.assertTrue(
-                number_entanglement > 0.0 or np.isclose(number_entanglement, 0.0)
+                number_entanglement_a > 0.0 or np.isclose(number_entanglement_a, 0.0)
             )
-
-        # TODO: Implement a test for symmetric separable states
+            self.assertTrue(np.isclose(number_entanglement_a, number_entanglement_b))
+            print(number_entanglement_a)
 
 
 if __name__ == "__main__":

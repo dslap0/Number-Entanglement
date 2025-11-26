@@ -1,3 +1,5 @@
+# coding=utf-8
+
 """
 @author: Nicolas Levasseur
 
@@ -11,14 +13,15 @@ to look at the upper bound of the mean number entanglement for non-degenerate nu
 operators acting on each subspace.
 """
 
+
 from collections import defaultdict
 
 import numpy as np
 
 import matplotlib.pyplot as plt
 
-from scipy.linalg import expm, logm
-from scipy.optimize import curve_fit
+from scipy.linalg import logm
+from scipy.stats import chi
 
 
 SQRT_2_OVER_2 = np.sqrt(2.0) / 2.0
@@ -46,7 +49,10 @@ def random_pure_state(dim):
 
     @return: A 2D numpy array representing a pure state density matrix.
     """
+    # Choose either
+    # state_vector = rng.uniform(-1.0, 1.0, (dim, 2))
     state_vector = rng.normal(0.0, SQRT_2_OVER_2, (dim, 2))
+
     state_vector = np.float64(state_vector)
     state_vector = state_vector.view(np.complex128)
     state_vector /= np.linalg.norm(state_vector)
@@ -85,7 +91,7 @@ def separable_state_basis(dim_a, dim_b):
     dim_total = dim_a * dim_b
     basis_size = dim_total * dim_total
 
-    basis = [None] * basis_size
+    basis = [np.array([])] * basis_size
 
     i = 0
     while i < basis_size:
@@ -103,17 +109,19 @@ def separable_state_basis(dim_a, dim_b):
     return basis
 
 
-def random_separable_state(basis):
+def random_separable_state(dim_a, dim_b):
     """
     Generates a random separable state by using a convex combination of states from a
     given "basis".
 
-    @param basis: List of 2D numpy arrays representing the density matrices of separable
-        states to be convexically combined to generate any separable state.
+    @param dim_a: Dimension of the first subsystem Hilbert space.
+    @param dim_b: Dimension of the second subsystem Hilbert space.
 
     @return: A 2D numpy array representing the density matrix of a random separable
         state.
     """
+    basis = separable_state_basis(dim_a, dim_b)
+
     basis_size = len(basis)
 
     weights = rng.uniform(0.0, 1.0, basis_size)
@@ -127,19 +135,36 @@ def random_separable_state(basis):
     return state
 
 
+# def number_operator(dim):
+#     """
+#     Generates a number operator of the given dimension. This number operator corresponds
+#     to a site that can be occupied up to `dim - 1` times by increments of 1 each time.
+
+#     @param dim: Dimension of the generated matrix.
+
+#     @return: A 2D numpy array representing the matrix form of a number operator.
+#     """
+#     matrix = np.zeros((dim, dim))
+
+#     for i in range(dim):
+#         matrix[i][i] = i + 1
+
+#     return matrix
+
+
 def number_operator(dim):
     """
     Generates a number operator of the given dimension. This number operator corresponds
-    to a site that can be occupied up to `dim - 1` times by increments of 1 each time.
+    to a system with `sqrt(dim)` qubits.
 
-    @param dim: Dimension of the generated matrix.
+    @param dim: Dimension of the generated matrix. Should be a power of two.
 
     @return: A 2D numpy array representing the matrix form of a number operator.
     """
     matrix = np.zeros((dim, dim))
 
     for i in range(dim):
-        matrix[i][i] = i + 1
+        matrix[i][i] = int.bit_count(i)
 
     return matrix
 
@@ -159,10 +184,14 @@ def separable_operator(operator_function, dim_a, dim_b):
     operator_a = operator_function(dim_a)
     operator_b = operator_function(dim_b)
 
-    operator = np.kron(operator_a, np.eye(dim_b, dtype=np.float64))
-    operator += np.kron(np.eye(dim_a, dtype=np.float64), operator_b)
+    operator = np.kron(operator_a, operator_b)
 
-    return operator
+    operator_a = np.kron(operator_a, np.eye(dim_b, dtype=np.float64))
+    operator_b = np.kron(np.eye(dim_a, dtype=np.float64), operator_b)
+
+    # operator = operator_a + operator_b
+
+    return operator, operator_a, operator_b
 
 
 def find_charge_sectors(operator):
@@ -184,47 +213,6 @@ def find_charge_sectors(operator):
     return charge_sectors
 
 
-def scramble_basis(operator):
-    """
-    Finds a scrambled basis of a given diagonal `operator`. The returned basis is not
-    the identity matrix if the `operator` is degenerate (it is therefore "scrambled").
-
-    @param operator: A 2D array representing the matrix form of a diagonal operator.
-
-    @return: A 2D array representing the matrix form of the scrambled basis.
-    """
-    dim = len(operator)
-    charge_sectors = find_charge_sectors(operator)
-
-    scrambled_basis = np.eye(dim, dtype=np.complex128)
-
-    for eigenvalue in charge_sectors:
-        positions = charge_sectors[eigenvalue]
-
-        scramble_size = len(positions)
-
-        if scramble_size == 1:
-            continue
-
-        scramble_matrix = np.zeros((dim, dim), dtype=np.complex128)
-
-        for i, position_i in enumerate(positions):
-            for position_j in positions[:i]:
-                random = rng.uniform(-1.0, 1.0) + 1.0j * rng.uniform(-1.0, 1.0)
-                random = np.complex128(random)
-
-                scramble_matrix[position_i][position_j] = random
-                scramble_matrix[position_j][position_i] = random.conj()
-
-        scramble_matrix = expm(1.0j * scramble_matrix * rng.uniform(-np.pi, np.pi))
-
-        for i in positions:
-            for j in positions:
-                scrambled_basis[i][j] = scramble_matrix[i][j]
-
-    return scrambled_basis
-
-
 def project_states(states, operator):
     """
     Projects some given `states` to all the fixed eigenvalues of a given `operator`.
@@ -236,19 +224,20 @@ def project_states(states, operator):
 
     @return: A list of 2D numpy arrays representing the projected state density matrices.
     """
-    scrambled_basis = scramble_basis(operator)
+    charge_sectors = find_charge_sectors(operator)
 
-    projection_operators = [ket_bra(vector) for vector in scrambled_basis.T]
+    new_states = [np.array([])] * len(states)
 
-    projected_states = [None] * len(states)
     for i, state in enumerate(states):
-        projected_state = np.zeros_like(state)
-        for projection_operator in projection_operators:
-            projected_state += projection_operator @ state @ projection_operator
+        new_state = np.zeros_like(state)
+        for sector in charge_sectors.values():
+            for j in sector:
+                for k in sector:
+                    new_state[j][k] = state[j][k]
 
-        projected_states[i] = projected_state
+        new_states[i] = new_state
 
-    return projected_states
+    return new_states
 
 
 def von_neumann_entropy(state):
@@ -269,27 +258,20 @@ def von_neumann_entropy(state):
     return entropy
 
 
-def numbers_entanglement(states):
+def numbers_entanglement(states, operator):
     """
     Computes the numbers entanglement of some given `states` over a given `operator`.
 
     @param states: List of 2D numpy arrays representing the density matrix of a quantum
         state.
+    @param operator: 2D numpy array representing an operator in the combined Hilbert
+        space. This operator acts only on one of the subsystems.
 
     @return: A list of each state numbers entanglement for the given operator.
     """
     states_size = len(states)
 
-    states_a = [0.0] * states_size
-
-    for i, state in enumerate(states):
-        dim = len(state)
-        state_a = np.zeros((dim, dim), dtype=np.complex128)
-
-        for j in range(dim):
-            state_a[j][j] = state[j][j]
-
-        states_a[i] = state_a
+    states_a = project_states(states, operator)
 
     number_entanglement_list = [0.0] * states_size
     for i, state, state_a in zip(range(states_size), states, states_a):
@@ -301,100 +283,135 @@ def numbers_entanglement(states):
     return number_entanglement_list
 
 
-def mean_number_entanglement(n_states, dim_a, dim_b):
+def numbers_entanglement_distribution(n_states, dim_a, dim_b):
     """
-    Computes the mean number entanglement of some given dimensions.
+    Computes a distribution of number entanglements of some given dimensions.
 
     @param n_states: Number of states to be generated for the computation.
     @param dim_a: Dimension of the first subsystem Hilbert space.
     @param dim_b: Dimension of the second subsystem Hilbert space.
 
-    @return: Tuple containing the mean number entanglement and its standard deviation.
+    @return: Array containing number entanglements.
     """
-    basis = separable_state_basis(dim_a, dim_b)
-    states = [random_separable_state(basis) for _ in range(n_states)]
+    states = [random_separable_state(dim_a, dim_b) for _ in range(n_states)]
 
-    operator = separable_operator(number_operator, dim_a, dim_b)
+    operator, operator_a, _ = separable_operator(number_operator, dim_a, dim_b)
 
     projected_states = project_states(states, operator)
-    number_entanglement_list = numbers_entanglement(projected_states)
+    number_entanglement_list = numbers_entanglement(projected_states, operator_a)
 
     number_entanglement_array = np.array(number_entanglement_list)
 
-    return number_entanglement_array.mean(), number_entanglement_array.std()
+    return number_entanglement_array
 
 
-def prediction(x, a, b):
-    return b * x**a
-
-
-def draw(x, y, y_error, y_function, x_label, y_label, title):
+def histogram(x, dim):
     """
-    Draws a line graphs of the pairs `(x[i], y[i])` against a prediction
-    `(x[i], y_function(x[i]))`.
+    Draws and saves an histogram plot of `x`, fitted to a chi distribution.
 
-    @param x: Horizontal data points.
-    @param y: Vertical data points.
-    @param y_error: Vertical data points error.
-    @param y_function: Function used to predict the vertical data points.
-    @param x_label: Horizontal axis label.
-    @param x_label: Vertical axis label.
-    @param title: Title of the graph's file.
+    @param x: Array representing the distribution data points.
+    @param dim: Dimension of the combined Hilbert space.
 
-    @return: Parameters of the prediction function used.
+    @return: A tuple containing the fitted parameters of the chi distribution.
     """
-    plt.figure()
+    plt.figure(figsize=(4, 3), dpi=100)
 
-    params_y, _ = curve_fit(y_function, x, y)
-    a, b = params_y
-    plt.scatter(x, y, c="#1f77b4", label=r"$\overline{\Delta S}$")
-    plt.plot(
-        x,
-        y_function(x, *params_y),
-        c="#1f77b4",
-        label=r"${:.2f} \cdot (d_A d_B)^{{{:.2f}}}$".format(b, a),
+    bins = len(x) // 100
+    count, bins_size, _ = plt.hist(
+        x, bins, density=True, color="#1f77b480", label=r"$\Delta S$"
     )
 
-    params_y_error, _ = curve_fit(y_function, x, y_error)
-    a, b = params_y_error
-    plt.scatter(x, y_error, c="#ff7f0e", label=r"$\sigma(\Delta S)$")
+    x_min = bins_size[1]
+    x_max = x.max()
+    y_min = 0.0
+    y_max = 1.05 * np.max(count)
+
+    mean = x.mean()
+    median = np.median(x)
+    plt.vlines(mean, y_min, y_max, colors="#1f77b4", linestyles="dashed")
+    plt.vlines(median, y_min, y_max, colors="#1f77b4", linestyles="dotted")
+    k = np.sqrt(dim)
+    k, loc, scale = chi.fit(x, k, loc=0.0, scale=5e-3 / dim, method="MLE")
+
+    x = np.linspace(x_min, x_max, 200)
+    y = chi.pdf(x, k, loc, scale)
     plt.plot(
         x,
-        y_function(x, *params_y_error),
-        c="#ff7f0e",
-        label=r"${:.2f} \cdot (d_A d_B)^{{{:.2f}}}$".format(b, a),
+        y,
+        color="#ff7f0e",
+        label=rf"$\chi(x; k={k:.1f})$",
     )
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
+
+    mean = chi.mean(k, loc, scale)
+    median = chi.median(k, loc, scale)
+    plt.vlines(mean, y_min, y_max, colors="#ff7f0e", linestyles="dashed")
+    plt.vlines(median, y_min, y_max, colors="#ff7f0e", linestyles="dotted")
+
+    plt.xlabel(r"$\Delta S$")
+    plt.ylabel("Count")
+    plt.ticklabel_format(axis="x", scilimits=(-1, 4))
+    plt.vlines(0.0, 0.0, 0.0, colors="black", linestyles="dashed", label="Mean")
+    plt.vlines(0.0, 0.0, 0.0, colors="black", linestyles="dotted", label="Median")
+
     plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"hist_chi_D_{dim}_qubits.png")
 
-    plt.savefig(title + ".png")
+    return k, x.std()
+
+
+def plot_params(dims, ks, stds):
+    """
+    Make a plot for each parameter of the chi distribution compared to the system's
+    dimensions.
+
+    @param dims: Array of int containing the dimensions of the system.
+    @param ks: Array of floats containing the fitted k parameters of the chi
+        distribution.
+    @param locs: Array of floats containing the standard deviation of the actual distribution.
+    """
+    x_label = r"$d_A d_B$"
+
+    plt.figure(figsize=(4, 3), dpi=100)
+    plt.plot(dims, ks)
+    plt.xlabel(x_label)
+    plt.ylabel(r"k")
+    plt.tight_layout()
+    plt.savefig("chi_k_qubits.png")
+
+    plt.figure(figsize=(4, 3), dpi=100)
+    plt.plot(dims, stds)
+    plt.xlabel(x_label)
+    plt.ylabel(r"$\sigma$")
+    plt.tight_layout()
+    plt.savefig("chi_std_qubits.png")
 
 
 if __name__ == "__main__":
-    N_STATES = 1000
-    dims_a = list(range(2, 40))
-    dims_total = []
-    means = []
+    N_STATES = 10000
+    dims_a = np.array(list(range(1, 4)))
+    dims_a = 2**dims_a
+
+    dims = []
+    ks = []
     stds = []
 
-    for dim_a in dims_a:
-        dim_b = 2
+    try:
+        for dim_a in dims_a:
+            dim_b = dim_a
+            dim_total = dim_a * dim_b
 
-        mean, std = mean_number_entanglement(N_STATES, dim_a, dim_b)
+            distribution = numbers_entanglement_distribution(N_STATES, dim_a, dim_b)
 
-        dims_total.append(dim_a * dim_b)
-        means.append(mean)
-        stds.append(std)
+            k, std = histogram(distribution, dim_total)
 
-        print(dim_a)
+            dims.append(dim_total)
+            ks.append(k)
+            stds.append(std)
 
-    dims_total = np.array(dims_total)
-    means = np.array(means)
-    stds = np.array(stds)
+    finally:
+        dims = np.array(dims)
+        ks = np.array(ks)
+        stds = np.array(stds)
 
-    x_label = r"$d_A d_B$"
-    y_label = r"$\Delta S$"
-    title = "dim_b = 2"
-
-    draw(dims_total, means, stds, prediction, x_label, y_label, title)
+        plot_params(dims, ks, stds)
