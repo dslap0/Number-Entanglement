@@ -49,7 +49,7 @@ def random_pure_state(dim):
 
     @return: A 2D numpy array representing a pure state density matrix.
     """
-    # Choose either
+    # The state vectors can be generated from either one of these two methods:
     # state_vector = rng.uniform(-1.0, 1.0, (dim, 2))
     state_vector = rng.normal(0.0, SQRT_2_OVER_2, (dim, 2))
 
@@ -135,24 +135,24 @@ def random_separable_state(dim_a, dim_b):
     return state
 
 
-# def number_operator(dim):
-#     """
-#     Generates a number operator of the given dimension. This number operator corresponds
-#     to a site that can be occupied up to `dim - 1` times by increments of 1 each time.
-
-#     @param dim: Dimension of the generated matrix.
-
-#     @return: A 2D numpy array representing the matrix form of a number operator.
-#     """
-#     matrix = np.zeros((dim, dim))
-
-#     for i in range(dim):
-#         matrix[i][i] = i + 1
-
-#     return matrix
-
-
 def number_operator(dim):
+    """
+    Generates a number operator of the given dimension. This number operator corresponds
+    to a site that can be occupied up to `dim - 1` times by increments of 1 each time.
+
+    @param dim: Dimension of the generated matrix.
+
+    @return: A 2D numpy array representing the matrix form of a number operator.
+    """
+    matrix = np.zeros((dim, dim))
+
+    for i in range(dim):
+        matrix[i][i] = i + 1
+
+    return matrix
+
+
+def qubit_number_operator(dim):
     """
     Generates a number operator of the given dimension. This number operator corresponds
     to a system with `sqrt(dim)` qubits.
@@ -169,27 +169,32 @@ def number_operator(dim):
     return matrix
 
 
-def separable_operator(operator_function, dim_a, dim_b):
+def separable_operator(operator_function, dim_a, dim_b, add=False):
     """
     Generates two operators acting on two different Hilbert spaces and combines them
     into a single operator acting on both Hilbert spaces.
 
-    @param operator_function: Function used to generate the operators that will compose
-        the final one.
+    @param operator_function: Function used to generate the two operators that will
+        compose the final one.
     @param dim_a: Dimension of the first subsystem.
     @param dim_b: Dimension of the second subsystem.
+    @param add: If True, the combined operator is the sum of the two operators acting on
+        their respective subsystem. If False, the combined operator is the tensor product
+        of the two operators.
 
     @return: A 2D numpy array representing the matrix form of the combined operator.
     """
     operator_a = operator_function(dim_a)
     operator_b = operator_function(dim_b)
 
-    operator = np.kron(operator_a, operator_b)
+    if add:
+        operator = np.kron(operator_a, operator_b)
 
     operator_a = np.kron(operator_a, np.eye(dim_b, dtype=np.float64))
     operator_b = np.kron(np.eye(dim_a, dtype=np.float64), operator_b)
 
-    # operator = operator_a + operator_b
+    if not add:
+        operator = operator_a + operator_b
 
     return operator, operator_a, operator_b
 
@@ -283,19 +288,26 @@ def numbers_entanglement(states, operator):
     return number_entanglement_list
 
 
-def numbers_entanglement_distribution(n_states, dim_a, dim_b):
+def numbers_entanglement_distribution(n_states, dim_a, dim_b, qubits=False, add=False):
     """
     Computes a distribution of number entanglements of some given dimensions.
 
     @param n_states: Number of states to be generated for the computation.
     @param dim_a: Dimension of the first subsystem Hilbert space.
     @param dim_b: Dimension of the second subsystem Hilbert space.
+    @param qubits: If True, the number operators used are qubit number operators. If
+        False, the number operators used are multilevel number operators.
+    @param add: If True, the combined operator is the sum of the two operators acting on
+        their respective subsystem. If False, the combined operator is the tensor product
+        of the two operators.
 
     @return: Array containing number entanglements.
     """
     states = [random_separable_state(dim_a, dim_b) for _ in range(n_states)]
 
-    operator, operator_a, _ = separable_operator(number_operator, dim_a, dim_b)
+    n_operator = qubit_number_operator if qubits else number_operator
+
+    operator, operator_a, _ = separable_operator(n_operator, dim_a, dim_b, add)
 
     projected_states = project_states(states, operator)
     number_entanglement_list = numbers_entanglement(projected_states, operator_a)
@@ -305,12 +317,13 @@ def numbers_entanglement_distribution(n_states, dim_a, dim_b):
     return number_entanglement_array
 
 
-def histogram(x, dim):
+def histogram(x, dim, suffix=""):
     """
     Draws and saves an histogram plot of `x`, fitted to a chi distribution.
 
     @param x: Array representing the distribution data points.
     @param dim: Dimension of the combined Hilbert space.
+    @param suffix: Suffix to append to the figure name.
 
     @return: A tuple containing the fitted parameters of the chi distribution.
     """
@@ -355,12 +368,12 @@ def histogram(x, dim):
 
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"hist_chi_D_{dim}_qubits.png")
+    plt.savefig(f"hist_chi_D_{dim}" + suffix)
 
     return k, x.std()
 
 
-def plot_params(dims, ks, stds):
+def plot_params(dims, ks, stds, suffix=""):
     """
     Make a plot for each parameter of the chi distribution compared to the system's
     dimensions.
@@ -369,6 +382,7 @@ def plot_params(dims, ks, stds):
     @param ks: Array of floats containing the fitted k parameters of the chi
         distribution.
     @param locs: Array of floats containing the standard deviation of the actual distribution.
+    @param suffix: Suffix to append to the figure name.
     """
     x_label = r"$d_A d_B$"
 
@@ -377,18 +391,21 @@ def plot_params(dims, ks, stds):
     plt.xlabel(x_label)
     plt.ylabel(r"k")
     plt.tight_layout()
-    plt.savefig("chi_k_qubits.png")
+    plt.savefig("chi_k" + suffix)
 
     plt.figure(figsize=(4, 3), dpi=100)
     plt.plot(dims, stds)
     plt.xlabel(x_label)
     plt.ylabel(r"$\sigma$")
     plt.tight_layout()
-    plt.savefig("chi_std_qubits.png")
+    plt.savefig("chi_std" + suffix)
 
 
 if __name__ == "__main__":
+    # Parameters
     N_STATES = 10000
+    qubits = True
+    add = False
     dims_a = np.array(list(range(1, 4)))
     dims_a = 2**dims_a
 
@@ -396,14 +413,23 @@ if __name__ == "__main__":
     ks = []
     stds = []
 
+    suffix = ""
+    if qubits:
+        suffix += "_qubits"
+    if add:
+        suffix += "_add"
+    suffix += ".png"
+
     try:
         for dim_a in dims_a:
             dim_b = dim_a
             dim_total = dim_a * dim_b
 
-            distribution = numbers_entanglement_distribution(N_STATES, dim_a, dim_b)
+            distribution = numbers_entanglement_distribution(
+                N_STATES, dim_a, dim_b, qubits, add
+            )
 
-            k, std = histogram(distribution, dim_total)
+            k, std = histogram(distribution, dim_total, suffix)
 
             dims.append(dim_total)
             ks.append(k)
@@ -414,4 +440,4 @@ if __name__ == "__main__":
         ks = np.array(ks)
         stds = np.array(stds)
 
-        plot_params(dims, ks, stds)
+        plot_params(dims, ks, stds, suffix)

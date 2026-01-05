@@ -177,6 +177,16 @@ class TestNumberEntanglement(unittest.TestCase):
 
         self.assertTrue(is_hermitian(operator, dim))
 
+    def test_qubit_number_operator(self):
+        n_qubits = 3
+        dim = 2**n_qubits
+        operator = qubit_number_operator(dim)
+
+        non_zero_elements = np.count_nonzero(operator - np.diag(np.diagonal(operator)))
+        self.assertEqual(non_zero_elements, 0)
+
+        self.assertTrue(is_hermitian(operator, dim))
+
     def test_separable_operator(self):
         dim_a = 2
         dim_b = 4
