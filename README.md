@@ -66,11 +66,3 @@ statistics). Modify `dims_a` to change which subsystem sizes are tested.
 **Outputs**
 - Histogram per dimension: `hist_chi_D_<dim><suffix>` (PNG)
 - Fitted parameter plots: `chi_k<suffix>` and `chi_std<suffix>` (PNG)
-
-**Notes & tips**
-- Running with a large `N_STATES` can be CPU and memory intensive; reduce it
-	for quick experiments.
-- If you want deterministic results across runs, set the RNG seed as shown
-	above.
-- The plotting backend writes files to the current working directory; run
-	the script where you want the PNGs saved.
